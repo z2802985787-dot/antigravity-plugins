@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>Token 与上下文监控</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/preload.js"></script>
+</head>
+<body>
+  <div class="panel">
+    <!-- 顶部栏：标题与视图切换 -->
+    <div class="top-header">
+      <div class="title-row">
+        <div class="title-group">
+          <span class="status-dot" id="live-dot"></span>
+          <h1>Token 与上下文监控</h1>
+        </div>
+        <span class="model-tag" id="model-badge">Gemini</span>
+      </div>
+
+      <!-- 顶部主导航标签页：当前会话 vs 全局统计 -->
+      <div class="view-tabs" id="view-tabs">
+        <button type="button" class="view-tab active" data-tab="session">
+          <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 14l4-4"/>
+            <path d="M3.34 19a10 10 0 1 1 17.32 0"/>
+          </svg>
+          <span>当前会话监控</span>
+        </button>
+        <button type="button" class="view-tab" data-tab="global">
+          <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="7" height="7" rx="1"/>
+            <rect x="14" y="3" width="7" height="7" rx="1"/>
+            <rect x="14" y="14" width="7" height="7" rx="1"/>
+            <rect x="3" y="14" width="7" height="7" rx="1"/>
+          </svg>
+          <span>全局统计与热力图</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ==================== 视图 1：当前会话实时监控 ==================== -->
+    <div id="tab-panel-session" class="tab-panel">
+      <div class="toolbar-row">
+        <select id="conv-select" class="conv-select" title="选择监控的会话">
+          <option value="auto">自动跟随活跃会话</option>
+        </select>
+      </div>
+
+      <!-- 仿 DSH 上下文详情浮层卡片 -->
+      <div class="dsh-popover-card">
+        <div class="dsh-header">
+          <span class="dsh-title">上下文已用 <strong id="ctx-pct-title">0%</strong></span>
+          <span class="dsh-fraction" id="ctx-fraction">~0 / 256K</span>
+        </div>
+
+        <!-- 多段式彩色进度条 -->
+        <div class="dsh-progress-track" id="ctx-progress-track">
+          <div class="dsh-seg seg-system" id="seg-system" style="width: 0%"></div>
+          <div class="dsh-seg seg-tools" id="seg-tools" style="width: 0%"></div>
+          <div class="dsh-seg seg-chat" id="seg-chat" style="width: 0%"></div>
+        </div>
+
+        <!-- 三项核心分类明细 -->
+        <div class="dsh-legend-list">
+          <div class="dsh-legend-row">
+            <div class="dsh-legend-label">
+              <span class="legend-dot dot-system"></span>
+              <span>系统提示词</span>
+            </div>
+            <span class="dsh-legend-val" id="val-system">~0</span>
+          </div>
+
+          <div class="dsh-legend-row">
+            <div class="dsh-legend-label">
+              <span class="legend-dot dot-tools"></span>
+              <span>工具定义</span>
+            </div>
+            <span class="dsh-legend-val" id="val-tools">~0</span>
+          </div>
+
+          <div class="dsh-legend-row">
+            <div class="dsh-legend-label">
+              <span class="legend-dot dot-chat"></span>
+              <span>对话消息</span>
+            </div>
+            <span class="dsh-legend-val" id="val-chat">~0</span>
+          </div>
+
+          <div class="dsh-sub-row" id="chat-sub-row">
+            <span>其中：对话与思考 <b id="val-chat-pure">~0</b></span>
+            <span>·</span>
+            <span>工具调用输出 <b id="val-chat-tool">~0</b></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 仿 DSH 底部三合一实时状态胶囊栏 -->
+      <div class="dsh-status-bar">
+        <div class="dsh-bar-item" title="最新一轮 Token 综合生成速度">
+          <svg class="dsh-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 14l4-4"/>
+            <path d="M3.34 19a10 10 0 1 1 17.32 0"/>
+          </svg>
+          <span id="bar-speed">-- tok/s</span>
+        </div>
+
+        <div class="dsh-bar-item" title="最新一轮前缀缓存命中率 (cacheReadTokens / totalInputTokens)">
+          <svg class="dsh-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <ellipse cx="12" cy="5" rx="9" ry="3"/>
+            <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+            <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+          </svg>
+          <span>缓存命中 <b id="bar-cache">--%</b></span>
+        </div>
+
+        <div class="dsh-bar-pill" title="当前上下文已用比例">
+          <svg class="dsh-ring-svg" viewBox="0 0 20 20">
+            <circle class="ring-bg" cx="10" cy="10" r="7" fill="none" stroke-width="2.2"/>
+            <circle class="ring-fg" id="bar-ring-fg" cx="10" cy="10" r="7" fill="none" stroke-width="2.2" stroke-dasharray="43.98" stroke-dashoffset="43.98"/>
+          </svg>
+          <span id="bar-ctx-pct">0%</span>
+        </div>
+      </div>
+
+      <!-- 速度与延迟剖析卡片 -->
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">生成速度与延迟剖析</h2>
+          <span class="muted small" id="turn-indicator">第 0 轮</span>
+        </div>
+        <div class="metrics-grid">
+          <div class="metric-box">
+            <span class="metric-label">综合生成速度</span>
+            <span class="metric-value highlight-blue" id="detail-speed">-- tok/s</span>
+            <span class="metric-sub" id="detail-avg-speed">会话均值 -- tok/s</span>
+          </div>
+          <div class="metric-box">
+            <span class="metric-label">流式输出速度</span>
+            <span class="metric-value" id="detail-stream-speed">-- tok/s</span>
+            <span class="metric-sub" id="detail-stream-sec">流式耗时 --s</span>
+          </div>
+          <div class="metric-box">
+            <span class="metric-label">首字延迟 (TTFT)</span>
+            <span class="metric-value" id="detail-ttft">--s</span>
+            <span class="metric-sub" id="detail-total-sec">本轮总耗时 --s</span>
+          </div>
+          <div class="metric-box">
+            <span class="metric-label">本轮生成 Token</span>
+            <span class="metric-value" id="detail-out-tok">0</span>
+            <span class="metric-sub" id="detail-out-split">思考 0 · 回复 0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 缓存与会话累计统计 -->
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">缓存效率与累计消耗</h2>
+          <span class="muted small" id="session-cache-badge">全会话累计均值 --%</span>
+        </div>
+        <div class="metrics-grid">
+          <div class="metric-box">
+            <span class="metric-label">本轮缓存读取</span>
+            <span class="metric-value highlight-purple" id="detail-cache-tok">0</span>
+            <span class="metric-sub" id="detail-new-in-tok">新增输入 0</span>
+          </div>
+          <div class="metric-box">
+            <span class="metric-label">会话累计总输入</span>
+            <span class="metric-value" id="total-in-tok">0</span>
+            <span class="metric-sub" id="total-cache-tok">累计缓存 0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 轮次历史明细 -->
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">各轮次调用记录</h2>
+          <span class="muted small" id="update-time">--</span>
+        </div>
+        <div class="turns-list" id="turns-list">
+          <div class="empty-state muted">暂无轮次记录</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== 视图 2：全局统计与热力图 ==================== -->
+    <div id="tab-panel-global" class="tab-panel" hidden>
+      <!-- 1. 全站累计 Token 总览卡片 -->
+      <div class="dsh-popover-card global-hero-card">
+        <div class="global-hero-top">
+          <div>
+            <div class="global-hero-label">全站累计消耗总 Token</div>
+            <div class="global-hero-val" id="g-total-tokens">--</div>
+          </div>
+          <div class="global-hero-badges">
+            <span class="g-pill pill-purple" id="g-cache-rate">缓存命中 --%</span>
+            <span class="g-pill pill-blue" id="g-avg-speed">均速 -- tok/s</span>
+          </div>
+        </div>
+
+        <!-- 全局 Token 构成三色比例条：缓存读取 / 新增输入 / 模型输出 -->
+        <div class="dsh-progress-track">
+          <div class="dsh-seg seg-tools" id="g-seg-cache" style="width: 0%" title="前缀缓存读取 Token"></div>
+          <div class="dsh-seg seg-system" id="g-seg-uncached" style="width: 0%" title="未缓存新增输入 Token"></div>
+          <div class="dsh-seg seg-chat" id="g-seg-output" style="width: 0%" title="模型生成输出 Token"></div>
+        </div>
+
+        <div class="global-legend-inline">
+          <span><i class="legend-dot dot-tools"></i>缓存读取 <b id="g-leg-cache">0</b></span>
+          <span><i class="legend-dot dot-system"></i>新增输入 <b id="g-leg-uncached">0</b></span>
+          <span><i class="legend-dot dot-chat"></i>模型输出 <b id="g-leg-output">0</b></span>
+        </div>
+
+        <div class="metrics-grid">
+          <div class="metric-box">
+            <span class="metric-label">累计总输入 Token</span>
+            <span class="metric-value highlight-purple" id="g-box-input">0</span>
+            <span class="metric-sub" id="g-box-input-sub">缓存读取 0 · 新增 0</span>
+          </div>
+          <div class="metric-box">
+            <span class="metric-label">累计总输出 Token</span>
+            <span class="metric-value highlight-blue" id="g-box-output">0</span>
+            <span class="metric-sub" id="g-box-output-sub">思考 0 · 回复 0</span>
+          </div>
+          <div class="metric-box">
+            <span class="metric-label">会话与调用规模</span>
+            <span class="metric-value" id="g-box-convs">0 会话</span>
+            <span class="metric-sub" id="g-box-turns">累计 0 轮调用</span>
+          </div>
+          <div class="metric-box">
+            <span class="metric-label">生成耗时与首字延迟</span>
+            <span class="metric-value" id="g-box-duration">0m</span>
+            <span class="metric-sub" id="g-box-ttft">平均 TTFT --s</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. 双维度活动热力图（近 28 天日历 + 24 小时时段热力） -->
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">活动热力图</h2>
+          <span class="muted small" id="g-heatmap-summary">活跃 0 天</span>
+        </div>
+
+        <div class="heatmap-section-label">
+          <span>近 28 天每日 Token 活跃度</span>
+          <div class="heat-legend">
+            <span>少</span>
+            <i class="heat-lvl lvl-0"></i>
+            <i class="heat-lvl lvl-1"></i>
+            <i class="heat-lvl lvl-2"></i>
+            <i class="heat-lvl lvl-3"></i>
+            <i class="heat-lvl lvl-4"></i>
+            <span>多</span>
+          </div>
+        </div>
+
+        <div class="daily-heatmap-grid" id="g-daily-heatmap"></div>
+
+        <div class="heatmap-stat-strip" id="g-daily-detail">
+          <span>今日消耗：<b id="g-today-tok">0</b></span>
+          <span>峰值日：<b id="g-peak-day">--</b></span>
+        </div>
+
+        <div class="heatmap-divider"></div>
+
+        <div class="heatmap-section-label">
+          <span>24 小时时段活跃分布 (00:00 - 23:00)</span>
+          <span class="muted small" id="g-peak-hour">高峰时段 --</span>
+        </div>
+
+        <div class="hourly-heatmap-grid" id="g-hourly-heatmap"></div>
+      </div>
+
+      <!-- 3. 各项目 Token 消耗（无项目对话合并为「对话」） -->
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">各项目 Token 统计</h2>
+          <span class="muted small" id="g-projects-badge">无项目归属合并为「对话」</span>
+        </div>
+        <div class="group-list" id="g-projects-list">
+          <div class="empty-state muted">正在汇总各项目数据...</div>
+        </div>
+      </div>
+
+      <!-- 4. 各模型 Token 与性能对比 -->
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">各模型 Token 与性能对比</h2>
+          <span class="muted small" id="g-models-badge">0 款模型</span>
+        </div>
+        <div class="group-list" id="g-models-list">
+          <div class="empty-state muted">正在汇总各模型数据...</div>
+        </div>
+      </div>
+
+      <!-- 5. 高消耗会话排行榜 Top 10 -->
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">高消耗会话排行 (点击可查看详情)</h2>
+          <span class="muted small" id="g-update-time">--</span>
+        </div>
+        <div class="turns-list" id="g-top-convs-list">
+          <div class="empty-state muted">暂无会话记录</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

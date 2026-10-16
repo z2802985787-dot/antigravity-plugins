@@ -1,0 +1,18 @@
+{
+  "command": "node",
+  "args": ["main.mjs"],
+  "restart_policy": "always",
+  "display_name": "人设控制台",
+  "description": "在界面上可视化编辑、开启和关闭助手人设",
+  "has_web_ui": true,
+  "ui_config": {
+    "display_name": "人设控制台",
+    "views": [
+      {
+        "path": "/",
+        "entrypoint": "SIDECAR_UI_ENTRYPOINT_AUX_PANE",
+        "title": "人设控制台"
+      }
+    ]
+  }
+}

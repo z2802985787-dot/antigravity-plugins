@@ -1,0 +1,243 @@
+:root {
+  --radius: 8px;
+  --gap: 12px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  background: var(--background, #f8f9fa);
+  color: var(--foreground, #1f1f1f);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.panel-header h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  background: var(--card, #ffffff);
+  border: 1px solid var(--card-border, var(--border, #e3e3e3));
+  border-radius: var(--radius);
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.card-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.muted {
+  color: var(--muted-foreground, #5f6368);
+}
+
+.small {
+  font-size: 12px;
+}
+
+/* Switch / Toggle */
+.switch-container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.switch-label {
+  display: flex;
+  flex-direction: column;
+}
+
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--border, #ccc);
+  transition: .3s;
+  border-radius: 24px;
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: .3s;
+  border-radius: 50%;
+}
+
+input:checked + .slider {
+  background-color: var(--primary, #1a73e8);
+}
+
+input:checked + .slider:before {
+  transform: translateX(20px);
+}
+
+/* Preset Chips */
+.presets-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.chip-btn {
+  background: var(--secondary, #f1f3f4);
+  color: var(--secondary-foreground, var(--foreground, #1f1f1f));
+  border: 1px solid var(--border, #dadce0);
+  border-radius: 16px;
+  padding: 5px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.chip-btn:hover {
+  background: var(--border, #e2e8f0);
+  border-color: var(--muted-foreground, #9aa0a6);
+}
+
+/* Textarea & Inputs */
+textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border, #dadce0);
+  background: var(--background, #fff);
+  color: var(--foreground, #1f1f1f);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+  min-height: 110px;
+}
+
+textarea:focus {
+  outline: none;
+  border-color: var(--primary, #1a73e8);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary, #1a73e8) 25%, transparent);
+}
+
+/* Action Buttons */
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.btn {
+  padding: 7px 16px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+}
+
+.btn-primary {
+  background: var(--primary, #1a73e8);
+  color: var(--primary-foreground, #fff);
+}
+
+.btn-primary:hover {
+  background: color-mix(in srgb, var(--primary, #1a73e8) 85%, #000);
+}
+
+.btn-secondary {
+  background: var(--secondary, #f1f3f4);
+  color: var(--foreground, #1f1f1f);
+  border: 1px solid var(--border, #dadce0);
+}
+
+.btn-secondary:hover {
+  background: var(--border, #e2e8f0);
+}
+
+/* Toast */
+.toast {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: var(--card, #323232);
+  color: var(--foreground, #fff);
+  border: 1px solid var(--border, #444);
+  padding: 8px 16px;
+  border-radius: var(--radius);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  font-size: 12px;
+  z-index: 1000;
+  transition: opacity 0.3s;
+}
+
+.toast.error {
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+.notice-box {
+  background: color-mix(in srgb, var(--primary, #1a73e8) 8%, transparent);
+  border-left: 3px solid var(--primary, #1a73e8);
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+}

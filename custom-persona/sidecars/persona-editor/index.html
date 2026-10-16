@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>人设控制台</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/preload.js"></script>
+</head>
+<body>
+  <div class="panel">
+    <div class="panel-header">
+      <h1>🎭 人设控制台</h1>
+      <span id="save-status" class="muted small"></span>
+    </div>
+
+    <!-- 状态开关卡片 -->
+    <div class="card">
+      <div class="switch-container">
+        <div class="switch-label">
+          <span style="font-weight: 600;">启用个性化人设</span>
+          <span id="status-desc" class="muted small">当前人设生效中，对话更生动有温度</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="persona-toggle" checked>
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- 预设模版快捷选择 -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">快捷预设模板</h2>
+        <span class="muted small">点击一键填入</span>
+      </div>
+      <div class="presets-grid">
+        <button class="chip-btn" data-preset="neko">🐾 喵酱 (Neko)</button>
+        <button class="chip-btn" data-preset="blank">🌿 自然放空（中立搭档）</button>
+        <button class="chip-btn" data-preset="geek">🚀 机智幽默极客</button>
+        <button class="chip-btn" data-preset="veteran">☕ 资深技术老友</button>
+        <button class="chip-btn" data-preset="tsundere">⚡ 傲娇毒舌搭档</button>
+        <button class="chip-btn" data-preset="butler">🤖 科幻AI管家</button>
+      </div>
+    </div>
+
+    <!-- 人设内容编辑 -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">人设描述与语气设定</h2>
+        <span class="muted small">在下方直接输入，点击保存即可</span>
+      </div>
+      <textarea id="persona-text" rows="7" placeholder="描述你希望的角色风格、称呼偏好、说话语气或口头禅..."></textarea>
+      
+      <div class="notice-box muted">
+        🛡️ <b>质量隔离保障</b>：人设仅修饰对话外壳，代码与注释严禁出现卖萌/人设腔，注释只写 why 不复述 what。
+      </div>
+
+      <div class="actions">
+        <button class="btn btn-secondary" id="btn-reset">重置修改</button>
+        <button class="btn btn-primary" id="btn-save">保存设定</button>
+      </div>
+    </div>
+
+    <!-- 测试与交互 -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">效果测试</h2>
+        <span class="muted small">直接发送消息给助手测试新语气</span>
+      </div>
+      <div style="display: flex; gap: 8px;">
+        <input type="text" id="test-msg" placeholder="输入测试问题，例如：喵酱，在吗？" style="flex: 1; padding: 7px 12px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--background); color: var(--foreground); font-size: 13px;">
+        <button class="btn btn-secondary" id="btn-test">发送测试</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+{
+  "name": "token-monitor",
+  "displayName": "Token 与上下文监控",
+  "description": "实时监控对话的 Token 生成速度 (tok/s)、上下文缓存命中率与上下文容量分布（系统提示词、工具定义、对话消息）。",
+  "logo": "assets/logo.svg",
+  "version": "1.0.0"
+}
