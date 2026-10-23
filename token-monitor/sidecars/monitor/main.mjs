@@ -1703,7 +1703,7 @@ async function buildGlobalMetrics() {
   const projects = Array.from(projectMap.values())
     .map((p) => {
       const pTotalIn = p.uncachedInputTokens + p.cacheReadTokens;
-      p.conversations.sort((a, b) => b.netTokens - a.netTokens);
+      p.conversations.sort((a, b) => b.grossTokens - a.grossTokens);
       return {
         key: p.key,
         name: p.name,
@@ -1728,7 +1728,7 @@ async function buildGlobalMetrics() {
         conversations: p.conversations,
       };
     })
-    .sort((a, b) => b.netTokens - a.netTokens);
+    .sort((a, b) => b.grossTokens - a.grossTokens);
 
   // Finalize Models list
   const models = Array.from(modelMap.values())
@@ -1757,7 +1757,7 @@ async function buildGlobalMetrics() {
           m.outputTokens > 0 ? Number(((m.thinkingTokens / m.outputTokens) * 100).toFixed(1)) : 0,
       };
     })
-    .sort((a, b) => b.netTokens - a.netTokens);
+    .sort((a, b) => b.grossTokens - a.grossTokens);
 
   // Finalize Daily Activity Heatmap (last 28 days ending today)
   const now = new Date();
@@ -1774,9 +1774,9 @@ async function buildGlobalMetrics() {
     const dt = new Date(now.getFullYear(), now.getMonth(), now.getDate() - offset);
     const key = formatLocalDayKey(dt);
     const stat = dayMap.get(key) || { date: key, netTokens: 0, grossTokens: 0, totalTokens: 0, outputTokens: 0, turnsCount: 0 };
-    const ratio = maxDayNetTokens > 0 ? stat.netTokens / maxDayNetTokens : 0;
+    const ratio = maxDayGrossTokens > 0 ? stat.grossTokens / maxDayGrossTokens : 0;
     const level =
-      stat.netTokens <= 0 ? 0 : ratio <= 0.25 ? 1 : ratio <= 0.5 ? 2 : ratio <= 0.75 ? 3 : 4;
+      stat.grossTokens <= 0 ? 0 : ratio <= 0.25 ? 1 : ratio <= 0.5 ? 2 : ratio <= 0.75 ? 3 : 4;
     dailyCells.push({
       date: key,
       label: `${String(dt.getMonth() + 1).padStart(2, '0')}/${String(dt.getDate()).padStart(2, '0')}`,
@@ -1794,23 +1794,23 @@ async function buildGlobalMetrics() {
   const activeDaysList = Array.from(dayMap.values()).sort((a, b) => b.date.localeCompare(a.date));
   let peakDay = null;
   for (const d of activeDaysList) {
-    if (!peakDay || d.netTokens > peakDay.netTokens) {
+    if (!peakDay || d.grossTokens > peakDay.grossTokens) {
       peakDay = d;
     }
   }
   const todayStat = dayMap.get(todayKey) || { date: todayKey, netTokens: 0, grossTokens: 0, totalTokens: 0, outputTokens: 0, turnsCount: 0 };
 
   // Finalize 24-Hour Activity Heatmap
-  let maxHourNetTokens = 0;
+  let maxHourGrossTokens = 0;
   let peakHour = null;
   for (const h of hourBuckets) {
-    if (h.netTokens > maxHourNetTokens) maxHourNetTokens = h.netTokens;
-    if (!peakHour || h.netTokens > peakHour.netTokens) peakHour = h;
+    if (h.grossTokens > maxHourGrossTokens) maxHourGrossTokens = h.grossTokens;
+    if (!peakHour || h.grossTokens > peakHour.grossTokens) peakHour = h;
   }
   const hourlyCells = hourBuckets.map((h) => {
-    const ratio = maxHourNetTokens > 0 ? h.netTokens / maxHourNetTokens : 0;
+    const ratio = maxHourGrossTokens > 0 ? h.grossTokens / maxHourGrossTokens : 0;
     const level =
-      h.netTokens <= 0 ? 0 : ratio <= 0.25 ? 1 : ratio <= 0.5 ? 2 : ratio <= 0.75 ? 3 : 4;
+      h.grossTokens <= 0 ? 0 : ratio <= 0.25 ? 1 : ratio <= 0.5 ? 2 : ratio <= 0.75 ? 3 : 4;
     return {
       ...h,
       pctOfPeak: Math.round(ratio * 100),
@@ -1821,13 +1821,13 @@ async function buildGlobalMetrics() {
   const topLevelCount = activeConvs.filter((c) => !c.isSubagent).length;
   const subagentsCount = activeConvs.filter((c) => c.isSubagent).length;
 
-  convSummaries.sort((a, b) => b.netTokens - a.netTokens);
+  convSummaries.sort((a, b) => b.grossTokens - a.grossTokens);
 
   return {
     totals: {
       netTokens: globalNetTokens,
       grossTokens: globalGrossTokens,
-      totalTokens: globalNetTokens, // default to netTokens for user clarity!
+      totalTokens: globalGrossTokens,
       totalInputTokens: globalTotalInput,
       uncachedInputTokens: globalUncachedInput,
       cacheReadTokens: globalCacheRead,

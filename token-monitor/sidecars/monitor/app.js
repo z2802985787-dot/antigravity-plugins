@@ -3,7 +3,7 @@ const $ = (id) => document.getElementById(id);
 
 let activeTab = 'global';
 let selectedConvId = 'auto';
-let globalMetricScope = 'net'; // 'net' | 'gross'
+let globalMetricScope = 'gross'; // 'gross' (default) | 'net'
 let lastMetrics = null;
 let lastGlobalMetrics = null;
 const expandedProjects = new Set();
@@ -202,14 +202,14 @@ function renderGlobalMetrics(g) {
 
   // 1. Hero Totals
   const heroTok = isNet ? (t.netTokens || t.uncachedInputTokens + t.outputTokens) : (t.grossTokens || t.totalTokens);
-  $('g-hero-label').textContent = isNet ? '全站实际净消耗总 Token' : '全站全量上下文吞吐 Token';
+  $('g-hero-label').textContent = isNet ? '全站实际净新增输入/输出 Token' : '全站多轮上下文累计总 Token';
   $('g-total-tokens').textContent = formatCompactTokens(heroTok);
   $('g-hero-sub').textContent = isNet
-    ? `全量吞吐 ~${formatCompactTokens(t.grossTokens)} (含缓存读取 ${formatCompactTokens(t.cacheReadTokens)})`
-    : `其中实际净消耗 ~${formatCompactTokens(t.netTokens)} (新增输入 + 输出)`;
+    ? `不含多轮次历史缓存读取 · 全量多轮总消耗 ~${formatCompactTokens(t.grossTokens)}`
+    : `其中实际新增输入输出 ~${formatCompactTokens(t.netTokens)} · 跨轮次前缀缓存读取 ${formatCompactTokens(t.cacheReadTokens)}`;
   $('g-scope-hint').textContent = isNet
-    ? '净消耗 = 实际新增输入 + 模型实际输出，消除长对话每轮重复读取缓存导致的“虚高”'
-    : '全量吞吐 = 包含每轮次送入模型的完整前缀缓存，反映模型处理的实际总吞吐量';
+    ? '仅新增净消耗 = 仅统计未命中缓存的新增提示词与生成输出，不含轮次间反复读取的前缀缓存'
+    : '全量多轮上下文 = 完整计入多轮对话每次调用的全部上下文与缓存流转，真实反映实际计算负荷';
 
   $('g-cache-rate').textContent = `全局缓存命中 ${t.cacheHitRate}%`;
   $('g-avg-speed').textContent = `全站均速 ${t.avgTokPerSec} tok/s`;

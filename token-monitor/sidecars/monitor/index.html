@@ -187,24 +187,24 @@
 
     <!-- ==================== 视图 2：全局统计与热力图 ==================== -->
     <div id="tab-panel-global" class="tab-panel" hidden>
-      <!-- 统计口径切换：实际净消耗 (推荐) vs 全量上下文吞吐 -->
+      <!-- 统计口径切换：全量多轮上下文 (默认) vs 仅新增净消耗 -->
       <div class="metric-scope-bar">
         <div class="scope-switch" id="scope-switch">
-          <button type="button" class="scope-btn active" data-scope="net" title="推荐：仅统计新增输入与模型输出，剔除每轮重复读取的缓存">
+          <button type="button" class="scope-btn active" data-scope="gross" title="全量多轮上下文：完整计入多轮对话每轮调用向模型馈入的全部上下文（含前缀缓存），真实反映多轮交互总负荷">
+            <svg class="scope-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+            </svg>
+            <span>全量多轮上下文 (默认)</span>
+          </button>
+          <button type="button" class="scope-btn" data-scope="net" title="仅新增净消耗：仅统计未命中缓存的新增提示词与生成输出，不含轮次间反复读取的前缀缓存">
             <svg class="scope-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
               <polyline points="22 4 12 14.01 9 11.01"/>
             </svg>
-            <span>实际净消耗 (真实)</span>
-          </button>
-          <button type="button" class="scope-btn" data-scope="gross" title="全量上下文吞吐：包含每轮次向模型馈入的完整历史缓存读取">
-            <svg class="scope-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
-            </svg>
-            <span>全量上下文吞吐 (含缓存)</span>
+            <span>仅新增净消耗 (无缓存)</span>
           </button>
         </div>
-        <div class="scope-hint" id="g-scope-hint">净消耗 = 实际新增输入 + 模型实际输出，消除长对话每轮重复读取缓存导致的“虚高”</div>
+        <div class="scope-hint" id="g-scope-hint">全量多轮上下文 = 完整计入多轮对话每次调用的全部上下文与缓存流转，真实反映实际计算负荷</div>
       </div>
 
       <!-- 1. 全站累计 Token 总览卡片 -->
