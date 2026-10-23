@@ -187,12 +187,33 @@
 
     <!-- ==================== 视图 2：全局统计与热力图 ==================== -->
     <div id="tab-panel-global" class="tab-panel" hidden>
+      <!-- 统计口径切换：实际净消耗 (推荐) vs 全量上下文吞吐 -->
+      <div class="metric-scope-bar">
+        <div class="scope-switch" id="scope-switch">
+          <button type="button" class="scope-btn active" data-scope="net" title="推荐：仅统计新增输入与模型输出，剔除每轮重复读取的缓存">
+            <svg class="scope-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+              <polyline points="22 4 12 14.01 9 11.01"/>
+            </svg>
+            <span>实际净消耗 (真实)</span>
+          </button>
+          <button type="button" class="scope-btn" data-scope="gross" title="全量上下文吞吐：包含每轮次向模型馈入的完整历史缓存读取">
+            <svg class="scope-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+            </svg>
+            <span>全量上下文吞吐 (含缓存)</span>
+          </button>
+        </div>
+        <div class="scope-hint" id="g-scope-hint">净消耗 = 实际新增输入 + 模型实际输出，消除长对话每轮重复读取缓存导致的“虚高”</div>
+      </div>
+
       <!-- 1. 全站累计 Token 总览卡片 -->
       <div class="dsh-popover-card global-hero-card">
         <div class="global-hero-top">
           <div>
-            <div class="global-hero-label">全站累计消耗总 Token</div>
+            <div class="global-hero-label" id="g-hero-label">全站实际净消耗总 Token</div>
             <div class="global-hero-val" id="g-total-tokens">--</div>
+            <div class="global-hero-sub" id="g-hero-sub">全量吞吐 ~-- (含缓存读取 --)</div>
           </div>
           <div class="global-hero-badges">
             <span class="g-pill pill-purple" id="g-cache-rate">缓存命中 --%</span>

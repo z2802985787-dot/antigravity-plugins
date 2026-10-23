@@ -4,6 +4,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Response, SidecarApp } from 'sidecar_sdk';
 
+// Language Server in Antigravity hub runs on HTTPS with a self-signed localhost certificate
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const APP_DATA_DIR = process.env.ANTIGRAVITY_APP_DATA_DIR || join(homedir(), '.gemini', 'antigravity');
 const LS_ADDR = process.env.ANTIGRAVITY_LS_ADDRESS;
@@ -22,6 +25,55 @@ function jsonWithCors(data, status = 200) {
       'Cache-Control': 'no-store',
     },
   });
+}
+
+function loadProjectsConfigMap() {
+  const map = new Map();
+  try {
+    const projectsDir = join(homedir(), '.gemini', 'config', 'projects');
+    if (!existsSync(projectsDir)) return map;
+    for (const file of readdirSync(projectsDir)) {
+      if (!file.endsWith('.json')) continue;
+      try {
+        const parsed = JSON.parse(readFileSync(join(projectsDir, file), 'utf8'));
+        if (parsed && parsed.id) {
+          map.set(parsed.id, parsed);
+        }
+      } catch {}
+    }
+  } catch {}
+  return map;
+}
+
+async function callLanguageServer(serviceMethod, bodyObj) {
+  if (!LS_ADDR || !CSRF_TOKEN) return null;
+  const headers = {
+    'Content-Type': 'application/json',
+    'x-codeium-csrf-token': CSRF_TOKEN,
+  };
+  const body = JSON.stringify(bodyObj || {});
+
+  // Try HTTPS first (standard for Antigravity language_server.exe)
+  try {
+    const res = await fetch(`https://${LS_ADDR}/exa.language_server_pb.LanguageServerService/${serviceMethod}`, {
+      method: 'POST',
+      headers,
+      body,
+    });
+    if (res.ok) return await res.json();
+  } catch {}
+
+  // Fallback to HTTP
+  try {
+    const res = await fetch(`http://${LS_ADDR}/exa.language_server_pb.LanguageServerService/${serviceMethod}`, {
+      method: 'POST',
+      headers,
+      body,
+    });
+    if (res.ok) return await res.json();
+  } catch {}
+
+  return null;
 }
 
 function parseProtoDurationSec(val) {
@@ -73,40 +125,75 @@ function formatModelDisplayName(rawModel, rawUsageModel, rawPlannerModel) {
   return normalizeModelInfo(rawModel, rawUsageModel, rawPlannerModel).name;
 }
 
-function extractProjectInfo(meta) {
-  const pid = meta?.projectId || 'outside-of-project';
+function extractProjectInfo(meta, projectConfigMap) {
+  const pid = meta?.projectId;
   const workspaces = Array.isArray(meta?.workspaces) ? meta.workspaces : [];
   const uris = Array.isArray(meta?.workspaceUris) ? meta.workspaceUris : [];
   const rawUri = workspaces[0]?.workspaceFolderAbsoluteUri || uris[0] || '';
-  if (!pid || pid === 'outside-of-project' || !rawUri) {
-    return {
-      key: 'outside-of-project',
-      name: '对话',
-      isOutside: true,
-      subtitle: '无项目归属对话合并',
-    };
+
+  // 1. Direct PID lookup from project JSON configurations
+  if (pid && projectConfigMap?.has(pid)) {
+    const p = projectConfigMap.get(pid);
+    if (p.id !== 'outside-of-project' && !p.name.startsWith('token-monitor') && !p.name.startsWith('custom-persona')) {
+      const folderUri = p.projectResources?.resources?.[0]?.folderUri || rawUri || '';
+      return {
+        key: `project:${p.name}`,
+        name: p.name,
+        isOutside: false,
+        subtitle: folderUri ? decodeURIComponent(folderUri).replace(/^file:\/\/\/?/i, '') : p.name,
+        projectId: p.id,
+      };
+    }
   }
-  const decoded = decodeURIComponent(rawUri).replace(/\\/g, '/').replace(/\/+$/, '');
-  const wtMatch = decoded.match(/\/worktrees\/([^/]+)\//i);
-  let name = '';
-  if (wtMatch && wtMatch[1]) {
-    name = wtMatch[1];
-  } else {
-    const parts = decoded.split('/').filter(Boolean);
-    name = parts[parts.length - 1] || pid.slice(0, 8);
+
+  // 2. Folder URI lookup
+  if (rawUri) {
+    const decoded = decodeURIComponent(rawUri).replace(/\\/g, '/').replace(/\/+$/, '');
+    if (projectConfigMap) {
+      for (const p of projectConfigMap.values()) {
+        const pUri = p.projectResources?.resources?.[0]?.folderUri;
+        if (pUri && decodeURIComponent(pUri).toLowerCase() === rawUri.toLowerCase()) {
+          return {
+            key: `project:${p.name}`,
+            name: p.name,
+            isOutside: false,
+            subtitle: decoded.replace(/^file:\/\/\/?/i, ''),
+            projectId: p.id,
+          };
+        }
+      }
+    }
+    const wtMatch = decoded.match(/\/worktrees\/([^/]+)\//i);
+    let name = wtMatch?.[1] || '';
+    if (!name) {
+      const parts = decoded.split('/').filter(Boolean);
+      name = parts[parts.length - 1];
+    }
+    if (name && name !== 'antigravity' && name !== 'scratch') {
+      const repoName = workspaces[0]?.repository?.computedName || '';
+      const branch = workspaces[0]?.branchName || '';
+      const subtitle = repoName
+        ? branch
+          ? `${repoName} (${branch})`
+          : repoName
+        : decoded.replace(/^file:\/\/\/?/i, '');
+      return {
+        key: `project:${name}`,
+        name,
+        isOutside: false,
+        subtitle,
+        projectId: pid || null,
+      };
+    }
   }
-  const repoName = workspaces[0]?.repository?.computedName || '';
-  const branch = workspaces[0]?.branchName || '';
-  const subtitle = repoName
-    ? branch
-      ? `${repoName} (${branch})`
-      : repoName
-    : decoded.replace(/^file:\/\/\/?/i, '');
+
+  // 3. Fallback to outside of project
   return {
-    key: `project:${name}`,
-    name,
-    isOutside: false,
-    subtitle,
+    key: 'outside-of-project',
+    name: '对话',
+    isOutside: true,
+    subtitle: '无项目归属对话合并',
+    projectId: 'outside-of-project',
   };
 }
 
@@ -211,31 +298,15 @@ function listConversations() {
 }
 
 async function fetchCascadeTrajectory(conversationId) {
-  if (!LS_ADDR || !CSRF_TOKEN || !conversationId) return null;
-  const headers = {
-    'Content-Type': 'application/json',
-    'x-codeium-csrf-token': CSRF_TOKEN,
-  };
-  const [trajRes, gmRes] = await Promise.all([
-    fetch(`http://${LS_ADDR}/exa.language_server_pb.LanguageServerService/GetCascadeTrajectory`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ cascadeId: conversationId }),
-    }),
-    fetch(`http://${LS_ADDR}/exa.language_server_pb.LanguageServerService/GetCascadeTrajectoryGeneratorMetadata`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ cascadeId: conversationId, generatorMetadataOffset: 0 }),
-    }).catch(() => null),
+  if (!conversationId) return null;
+  const [trajData, gmData] = await Promise.all([
+    callLanguageServer('GetCascadeTrajectory', { cascadeId: conversationId }),
+    callLanguageServer('GetCascadeTrajectoryGeneratorMetadata', { cascadeId: conversationId, generatorMetadataOffset: 0 }),
   ]);
 
-  if (!trajRes.ok) return null;
-  const trajData = await trajRes.json();
-  if (gmRes && gmRes.ok) {
-    const gmData = await gmRes.json().catch(() => null);
-    if (Array.isArray(gmData?.generatorMetadata) && gmData.generatorMetadata.length > 0 && trajData?.trajectory) {
-      trajData.trajectory.generatorMetadata = gmData.generatorMetadata;
-    }
+  if (!trajData) return null;
+  if (Array.isArray(gmData?.generatorMetadata) && gmData.generatorMetadata.length > 0 && trajData?.trajectory) {
+    trajData.trajectory.generatorMetadata = gmData.generatorMetadata;
   }
   return trajData;
 }
@@ -1192,28 +1263,14 @@ function formatLocalDayKey(dateObj) {
 }
 
 async function fetchAllTrajectorySummaries() {
-  if (!LS_ADDR || !CSRF_TOKEN) return {};
-  try {
-    const res = await fetch(
-      `http://${LS_ADDR}/exa.language_server_pb.LanguageServerService/GetAllCascadeTrajectories`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-codeium-csrf-token': CSRF_TOKEN,
-        },
-        body: '{}',
-      }
-    );
-    if (!res.ok) return {};
-    const data = await res.json();
-    return data?.trajectorySummaries || {};
-  } catch {
-    return {};
-  }
+  const data = await callLanguageServer('GetAllCascadeTrajectories', {});
+  return data?.trajectorySummaries || {};
 }
 
-async function parseSingleConversationForGlobal(convEntry, lsSummary) {
+async function parseSingleConversationForGlobal(convEntry, lsSummary, projectConfigMap) {
+  if (lsSummary?.trajectoryType === 'CORTEX_TRAJECTORY_TYPE_SIDE_QUESTION') {
+    return null;
+  }
   const id = convEntry.id;
   const isRunning = lsSummary?.status === 'CASCADE_RUN_STATUS_RUNNING';
   const lsModMs = lsSummary?.lastModifiedTime ? new Date(lsSummary.lastModifiedTime).getTime() : 0;
@@ -1236,7 +1293,7 @@ async function parseSingleConversationForGlobal(convEntry, lsSummary) {
   const gmList = Array.isArray(trajectory.generatorMetadata) ? trajectory.generatorMetadata : [];
   const steps = Array.isArray(trajectory.steps) ? trajectory.steps : [];
 
-  const projectInfo = extractProjectInfo(meta);
+  const projectInfo = extractProjectInfo(meta, projectConfigMap);
   const parentConversationId = meta?.parentConversationId || null;
   const fallbackCreatedAt = meta?.createdAt || lsSummary?.createdTime || null;
 
@@ -1261,7 +1318,8 @@ async function parseSingleConversationForGlobal(convEntry, lsSummary) {
       const responseTokens = Number(
         u.responseOutputTokens || Math.max(0, outputTokens - thinkingTokens)
       );
-      const totalTokens = totalInputTokens + outputTokens;
+      const netTokens = inputTokens + outputTokens;
+      const grossTokens = totalInputTokens + outputTokens;
 
       const ttftSec = parseProtoDurationSec(chatModel.timeToFirstToken);
       const streamSec = parseProtoDurationSec(chatModel.streamingDuration);
@@ -1294,7 +1352,9 @@ async function parseSingleConversationForGlobal(convEntry, lsSummary) {
         outputTokens,
         thinkingTokens,
         responseTokens,
-        totalTokens,
+        netTokens,
+        grossTokens,
+        totalTokens: grossTokens,
         ttftSec,
         streamSec,
         totalSec,
@@ -1305,6 +1365,8 @@ async function parseSingleConversationForGlobal(convEntry, lsSummary) {
     const fb = buildMetricsFromTranscriptFile(id, convEntry.title);
     if (fb && Array.isArray(fb.turns)) {
       for (const t of fb.turns) {
+        const netTokens = t.inputTokens + t.outputTokens;
+        const grossTokens = t.totalInputTokens + t.outputTokens;
         turns.push({
           modelId: 'gemini-3.8-flash',
           modelName: 'Gemini 3.8 Flash',
@@ -1315,7 +1377,9 @@ async function parseSingleConversationForGlobal(convEntry, lsSummary) {
           outputTokens: t.outputTokens,
           thinkingTokens: t.thinkingTokens,
           responseTokens: t.responseTokens,
-          totalTokens: t.totalInputTokens + t.outputTokens,
+          netTokens,
+          grossTokens,
+          totalTokens: grossTokens,
           ttftSec: 0,
           streamSec: 0,
           totalSec: 0,
@@ -1350,6 +1414,7 @@ async function parseSingleConversationForGlobal(convEntry, lsSummary) {
 }
 
 async function buildGlobalMetrics() {
+  const projectConfigMap = loadProjectsConfigMap();
   const convList = listConversations();
   const lsSummaries = await fetchAllTrajectorySummaries();
 
@@ -1358,6 +1423,9 @@ async function buildGlobalMetrics() {
     convMap.set(c.id, c);
   }
   for (const [id, sum] of Object.entries(lsSummaries)) {
+    if (sum?.trajectoryType === 'CORTEX_TRAJECTORY_TYPE_SIDE_QUESTION') {
+      continue;
+    }
     if (!convMap.has(id)) {
       const modMs = sum?.lastModifiedTime ? new Date(sum.lastModifiedTime).getTime() : Date.now();
       const rawTitle = sum?.annotations?.title || sum?.summary || '';
@@ -1372,11 +1440,13 @@ async function buildGlobalMetrics() {
 
   const allEntries = Array.from(convMap.values());
   const parsedConvs = await Promise.all(
-    allEntries.map((entry) => parseSingleConversationForGlobal(entry, lsSummaries[entry.id]))
+    allEntries.map((entry) =>
+      parseSingleConversationForGlobal(entry, lsSummaries[entry.id], projectConfigMap)
+    )
   );
 
-  // Filter out empty trajectories with 0 turns
-  const activeConvs = parsedConvs.filter((c) => c.turns.length > 0);
+  // Filter out side-question nulls and empty trajectories with 0 turns
+  const activeConvs = parsedConvs.filter((c) => c && c.turns && c.turns.length > 0);
   const byId = new Map(activeConvs.map((c) => [c.id, c]));
 
   // Resolve human-friendly titles for subagent trajectories
@@ -1388,6 +1458,8 @@ async function buildGlobalMetrics() {
     }
   }
 
+  let globalNetTokens = 0;
+  let globalGrossTokens = 0;
   let globalUncachedInput = 0;
   let globalCacheRead = 0;
   let globalOutput = 0;
@@ -1405,6 +1477,8 @@ async function buildGlobalMetrics() {
   const hourBuckets = Array.from({ length: 24 }, (_, hour) => ({
     hour,
     label: `${String(hour).padStart(2, '0')}:00`,
+    netTokens: 0,
+    grossTokens: 0,
     totalTokens: 0,
     outputTokens: 0,
     turnsCount: 0,
@@ -1413,6 +1487,8 @@ async function buildGlobalMetrics() {
   const convSummaries = [];
 
   for (const c of activeConvs) {
+    let convNet = 0;
+    let convGross = 0;
     let convUncached = 0;
     let convCache = 0;
     let convOutput = 0;
@@ -1432,6 +1508,8 @@ async function buildGlobalMetrics() {
         conversationsCount: 0,
         subagentsCount: 0,
         turnsCount: 0,
+        netTokens: 0,
+        grossTokens: 0,
         totalTokens: 0,
         uncachedInputTokens: 0,
         cacheReadTokens: 0,
@@ -1453,13 +1531,20 @@ async function buildGlobalMetrics() {
     const seenModelsInConv = new Set();
 
     for (const t of c.turns) {
+      const net = t.netTokens || (t.inputTokens + t.outputTokens);
+      const gross = t.grossTokens || (t.totalInputTokens + t.outputTokens);
+
       globalTurns += 1;
+      globalNetTokens += net;
+      globalGrossTokens += gross;
       globalUncachedInput += t.inputTokens;
       globalCacheRead += t.cacheReadTokens;
       globalOutput += t.outputTokens;
       globalThinking += t.thinkingTokens;
       globalResponse += t.responseTokens;
 
+      convNet += net;
+      convGross += gross;
       convUncached += t.inputTokens;
       convCache += t.cacheReadTokens;
       convOutput += t.outputTokens;
@@ -1480,7 +1565,9 @@ async function buildGlobalMetrics() {
       }
 
       proj.turnsCount += 1;
-      proj.totalTokens += t.totalTokens;
+      proj.netTokens += net;
+      proj.grossTokens += gross;
+      proj.totalTokens += gross;
       proj.uncachedInputTokens += t.inputTokens;
       proj.cacheReadTokens += t.cacheReadTokens;
       proj.outputTokens += t.outputTokens;
@@ -1495,6 +1582,8 @@ async function buildGlobalMetrics() {
           provider: t.provider,
           turnsCount: 0,
           conversationsCount: 0,
+          netTokens: 0,
+          grossTokens: 0,
           totalTokens: 0,
           uncachedInputTokens: 0,
           cacheReadTokens: 0,
@@ -1509,7 +1598,9 @@ async function buildGlobalMetrics() {
       }
       const mod = modelMap.get(t.modelId);
       mod.turnsCount += 1;
-      mod.totalTokens += t.totalTokens;
+      mod.netTokens += net;
+      mod.grossTokens += gross;
+      mod.totalTokens += gross;
       mod.uncachedInputTokens += t.inputTokens;
       mod.cacheReadTokens += t.cacheReadTokens;
       mod.outputTokens += t.outputTokens;
@@ -1534,19 +1625,25 @@ async function buildGlobalMetrics() {
           if (!dayMap.has(dayKey)) {
             dayMap.set(dayKey, {
               date: dayKey,
+              netTokens: 0,
+              grossTokens: 0,
               totalTokens: 0,
               outputTokens: 0,
               turnsCount: 0,
             });
           }
           const dEntry = dayMap.get(dayKey);
-          dEntry.totalTokens += t.totalTokens;
+          dEntry.netTokens += net;
+          dEntry.grossTokens += gross;
+          dEntry.totalTokens += gross;
           dEntry.outputTokens += t.outputTokens;
           dEntry.turnsCount += 1;
 
           const hr = dt.getHours();
           if (hourBuckets[hr]) {
-            hourBuckets[hr].totalTokens += t.totalTokens;
+            hourBuckets[hr].netTokens += net;
+            hourBuckets[hr].grossTokens += gross;
+            hourBuckets[hr].totalTokens += gross;
             hourBuckets[hr].outputTokens += t.outputTokens;
             hourBuckets[hr].turnsCount += 1;
           }
@@ -1569,7 +1666,6 @@ async function buildGlobalMetrics() {
     }
 
     const convTotalIn = convUncached + convCache;
-    const convTotalTokens = convTotalIn + convOutput;
     const convSummary = {
       id: c.id,
       title: c.title,
@@ -1578,7 +1674,9 @@ async function buildGlobalMetrics() {
       isOutsideProject: c.projectInfo.isOutside,
       primaryModel,
       turnsCount: c.turns.length,
-      totalTokens: convTotalTokens,
+      netTokens: convNet,
+      grossTokens: convGross,
+      totalTokens: convGross,
       uncachedInputTokens: convUncached,
       cacheReadTokens: convCache,
       outputTokens: convOutput,
@@ -1594,7 +1692,6 @@ async function buildGlobalMetrics() {
   }
 
   const globalTotalInput = globalUncachedInput + globalCacheRead;
-  const globalTotalTokens = globalTotalInput + globalOutput;
   const globalCacheHitRate =
     globalTotalInput > 0 ? Number(((globalCacheRead / globalTotalInput) * 100).toFixed(1)) : 0;
   const globalAvgSpeed =
@@ -1606,7 +1703,7 @@ async function buildGlobalMetrics() {
   const projects = Array.from(projectMap.values())
     .map((p) => {
       const pTotalIn = p.uncachedInputTokens + p.cacheReadTokens;
-      p.conversations.sort((a, b) => b.totalTokens - a.totalTokens);
+      p.conversations.sort((a, b) => b.netTokens - a.netTokens);
       return {
         key: p.key,
         name: p.name,
@@ -1616,19 +1713,22 @@ async function buildGlobalMetrics() {
         subagentsCount: p.subagentsCount,
         totalSessionsCount: p.conversationsCount + p.subagentsCount,
         turnsCount: p.turnsCount,
-        totalTokens: p.totalTokens,
+        netTokens: p.netTokens,
+        grossTokens: p.grossTokens,
+        totalTokens: p.grossTokens,
         uncachedInputTokens: p.uncachedInputTokens,
         cacheReadTokens: p.cacheReadTokens,
         outputTokens: p.outputTokens,
         thinkingTokens: p.thinkingTokens,
         responseTokens: p.responseTokens,
-        sharePct: globalTotalTokens > 0 ? Number(((p.totalTokens / globalTotalTokens) * 100).toFixed(1)) : 0,
+        sharePct: globalGrossTokens > 0 ? Number(((p.grossTokens / globalGrossTokens) * 100).toFixed(1)) : 0,
+        netSharePct: globalNetTokens > 0 ? Number(((p.netTokens / globalNetTokens) * 100).toFixed(1)) : 0,
         cacheHitRate: pTotalIn > 0 ? Number(((p.cacheReadTokens / pTotalIn) * 100).toFixed(1)) : 0,
         avgTokPerSec: p.speedDenom > 0 ? Number((p.speedNumer / p.speedDenom).toFixed(1)) : 0,
         conversations: p.conversations,
       };
     })
-    .sort((a, b) => b.totalTokens - a.totalTokens);
+    .sort((a, b) => b.netTokens - a.netTokens);
 
   // Finalize Models list
   const models = Array.from(modelMap.values())
@@ -1640,13 +1740,16 @@ async function buildGlobalMetrics() {
         provider: m.provider,
         turnsCount: m.turnsCount,
         conversationsCount: m.conversationsCount,
-        totalTokens: m.totalTokens,
+        netTokens: m.netTokens,
+        grossTokens: m.grossTokens,
+        totalTokens: m.grossTokens,
         uncachedInputTokens: m.uncachedInputTokens,
         cacheReadTokens: m.cacheReadTokens,
         outputTokens: m.outputTokens,
         thinkingTokens: m.thinkingTokens,
         responseTokens: m.responseTokens,
-        sharePct: globalTotalTokens > 0 ? Number(((m.totalTokens / globalTotalTokens) * 100).toFixed(1)) : 0,
+        sharePct: globalGrossTokens > 0 ? Number(((m.grossTokens / globalGrossTokens) * 100).toFixed(1)) : 0,
+        netSharePct: globalNetTokens > 0 ? Number(((m.netTokens / globalNetTokens) * 100).toFixed(1)) : 0,
         cacheHitRate: mTotalIn > 0 ? Number(((m.cacheReadTokens / mTotalIn) * 100).toFixed(1)) : 0,
         avgTokPerSec: m.speedDenom > 0 ? Number((m.speedNumer / m.speedDenom).toFixed(1)) : 0,
         avgTtftSec: m.ttftCount > 0 ? Number((m.ttftSum / m.ttftCount).toFixed(2)) : 0,
@@ -1654,30 +1757,34 @@ async function buildGlobalMetrics() {
           m.outputTokens > 0 ? Number(((m.thinkingTokens / m.outputTokens) * 100).toFixed(1)) : 0,
       };
     })
-    .sort((a, b) => b.totalTokens - a.totalTokens);
+    .sort((a, b) => b.netTokens - a.netTokens);
 
   // Finalize Daily Activity Heatmap (last 28 days ending today)
   const now = new Date();
   const todayKey = formatLocalDayKey(now);
-  let maxDayTokens = 0;
+  let maxDayNetTokens = 0;
+  let maxDayGrossTokens = 0;
   for (const d of dayMap.values()) {
-    if (d.totalTokens > maxDayTokens) maxDayTokens = d.totalTokens;
+    if (d.netTokens > maxDayNetTokens) maxDayNetTokens = d.netTokens;
+    if (d.grossTokens > maxDayGrossTokens) maxDayGrossTokens = d.grossTokens;
   }
 
   const dailyCells = [];
   for (let offset = 27; offset >= 0; offset--) {
     const dt = new Date(now.getFullYear(), now.getMonth(), now.getDate() - offset);
     const key = formatLocalDayKey(dt);
-    const stat = dayMap.get(key) || { date: key, totalTokens: 0, outputTokens: 0, turnsCount: 0 };
-    const ratio = maxDayTokens > 0 ? stat.totalTokens / maxDayTokens : 0;
+    const stat = dayMap.get(key) || { date: key, netTokens: 0, grossTokens: 0, totalTokens: 0, outputTokens: 0, turnsCount: 0 };
+    const ratio = maxDayNetTokens > 0 ? stat.netTokens / maxDayNetTokens : 0;
     const level =
-      stat.totalTokens <= 0 ? 0 : ratio <= 0.25 ? 1 : ratio <= 0.5 ? 2 : ratio <= 0.75 ? 3 : 4;
+      stat.netTokens <= 0 ? 0 : ratio <= 0.25 ? 1 : ratio <= 0.5 ? 2 : ratio <= 0.75 ? 3 : 4;
     dailyCells.push({
       date: key,
       label: `${String(dt.getMonth() + 1).padStart(2, '0')}/${String(dt.getDate()).padStart(2, '0')}`,
       weekday: dt.getDay(),
       isToday: key === todayKey,
-      totalTokens: stat.totalTokens,
+      netTokens: stat.netTokens,
+      grossTokens: stat.grossTokens,
+      totalTokens: stat.grossTokens,
       outputTokens: stat.outputTokens,
       turnsCount: stat.turnsCount,
       level,
@@ -1687,23 +1794,23 @@ async function buildGlobalMetrics() {
   const activeDaysList = Array.from(dayMap.values()).sort((a, b) => b.date.localeCompare(a.date));
   let peakDay = null;
   for (const d of activeDaysList) {
-    if (!peakDay || d.totalTokens > peakDay.totalTokens) {
+    if (!peakDay || d.netTokens > peakDay.netTokens) {
       peakDay = d;
     }
   }
-  const todayStat = dayMap.get(todayKey) || { date: todayKey, totalTokens: 0, outputTokens: 0, turnsCount: 0 };
+  const todayStat = dayMap.get(todayKey) || { date: todayKey, netTokens: 0, grossTokens: 0, totalTokens: 0, outputTokens: 0, turnsCount: 0 };
 
   // Finalize 24-Hour Activity Heatmap
-  let maxHourTokens = 0;
+  let maxHourNetTokens = 0;
   let peakHour = null;
   for (const h of hourBuckets) {
-    if (h.totalTokens > maxHourTokens) maxHourTokens = h.totalTokens;
-    if (!peakHour || h.totalTokens > peakHour.totalTokens) peakHour = h;
+    if (h.netTokens > maxHourNetTokens) maxHourNetTokens = h.netTokens;
+    if (!peakHour || h.netTokens > peakHour.netTokens) peakHour = h;
   }
   const hourlyCells = hourBuckets.map((h) => {
-    const ratio = maxHourTokens > 0 ? h.totalTokens / maxHourTokens : 0;
+    const ratio = maxHourNetTokens > 0 ? h.netTokens / maxHourNetTokens : 0;
     const level =
-      h.totalTokens <= 0 ? 0 : ratio <= 0.25 ? 1 : ratio <= 0.5 ? 2 : ratio <= 0.75 ? 3 : 4;
+      h.netTokens <= 0 ? 0 : ratio <= 0.25 ? 1 : ratio <= 0.5 ? 2 : ratio <= 0.75 ? 3 : 4;
     return {
       ...h,
       pctOfPeak: Math.round(ratio * 100),
@@ -1714,11 +1821,13 @@ async function buildGlobalMetrics() {
   const topLevelCount = activeConvs.filter((c) => !c.isSubagent).length;
   const subagentsCount = activeConvs.filter((c) => c.isSubagent).length;
 
-  convSummaries.sort((a, b) => b.totalTokens - a.totalTokens);
+  convSummaries.sort((a, b) => b.netTokens - a.netTokens);
 
   return {
     totals: {
-      totalTokens: globalTotalTokens,
+      netTokens: globalNetTokens,
+      grossTokens: globalGrossTokens,
+      totalTokens: globalNetTokens, // default to netTokens for user clarity!
       totalInputTokens: globalTotalInput,
       uncachedInputTokens: globalUncachedInput,
       cacheReadTokens: globalCacheRead,
@@ -1747,7 +1856,7 @@ async function buildGlobalMetrics() {
       },
       hourly: {
         cells: hourlyCells,
-        peakHour: peakHour && peakHour.totalTokens > 0 ? peakHour : null,
+        peakHour: peakHour && peakHour.netTokens > 0 ? peakHour : null,
       },
     },
     topConversations: convSummaries.slice(0, 15),

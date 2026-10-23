@@ -3,6 +3,7 @@ const $ = (id) => document.getElementById(id);
 
 let activeTab = 'global';
 let selectedConvId = 'auto';
+let globalMetricScope = 'net'; // 'net' | 'gross'
 let lastMetrics = null;
 let lastGlobalMetrics = null;
 const expandedProjects = new Set();
@@ -197,13 +198,23 @@ function renderGlobalMetrics(g) {
   if (!g || !g.totals) return;
   lastGlobalMetrics = g;
   const t = g.totals;
+  const isNet = globalMetricScope === 'net';
 
   // 1. Hero Totals
-  $('g-total-tokens').textContent = formatCompactTokens(t.totalTokens);
+  const heroTok = isNet ? (t.netTokens || t.uncachedInputTokens + t.outputTokens) : (t.grossTokens || t.totalTokens);
+  $('g-hero-label').textContent = isNet ? '全站实际净消耗总 Token' : '全站全量上下文吞吐 Token';
+  $('g-total-tokens').textContent = formatCompactTokens(heroTok);
+  $('g-hero-sub').textContent = isNet
+    ? `全量吞吐 ~${formatCompactTokens(t.grossTokens)} (含缓存读取 ${formatCompactTokens(t.cacheReadTokens)})`
+    : `其中实际净消耗 ~${formatCompactTokens(t.netTokens)} (新增输入 + 输出)`;
+  $('g-scope-hint').textContent = isNet
+    ? '净消耗 = 实际新增输入 + 模型实际输出，消除长对话每轮重复读取缓存导致的“虚高”'
+    : '全量吞吐 = 包含每轮次送入模型的完整前缀缓存，反映模型处理的实际总吞吐量';
+
   $('g-cache-rate').textContent = `全局缓存命中 ${t.cacheHitRate}%`;
   $('g-avg-speed').textContent = `全站均速 ${t.avgTokPerSec} tok/s`;
 
-  const tot = Math.max(1, t.totalTokens);
+  const tot = Math.max(1, t.grossTokens || t.totalTokens);
   const cacheW = (t.cacheReadTokens / tot) * 100;
   const uncachedW = (t.uncachedInputTokens / tot) * 100;
   const outW = Math.max(t.outputTokens > 0 ? 1.5 : 0, (t.outputTokens / tot) * 100);
@@ -240,9 +251,10 @@ function renderGlobalMetrics(g) {
   const weekdayNames = ['日', '一', '二', '三', '四', '五', '六'];
   $('g-daily-heatmap').innerHTML = dailyCells
     .map((c) => {
-      const tokStr = c.totalTokens > 0 ? formatCompactTokens(c.totalTokens) : '-';
-      const titleTip = `${c.date} (周${weekdayNames[c.weekday]})\n消耗 Token: ${formatCompactTokens(c.totalTokens)} (输出 ${formatCompactTokens(c.outputTokens)})\n调用轮次: ${c.turnsCount} 轮`;
-      return `<div class="daily-cell lvl-${c.level} ${c.isToday ? 'today' : ''}" data-date="${c.date}" data-tok="${c.totalTokens}" data-turns="${c.turnsCount}" title="${escapeHtml(titleTip)}">
+      const cellTok = isNet ? (c.netTokens ?? c.totalTokens) : (c.grossTokens ?? c.totalTokens);
+      const tokStr = cellTok > 0 ? formatCompactTokens(cellTok) : '-';
+      const titleTip = `${c.date} (周${weekdayNames[c.weekday]})\n实际净消耗: ${formatCompactTokens(c.netTokens)} (输出 ${formatCompactTokens(c.outputTokens)})\n全量吞吐: ${formatCompactTokens(c.grossTokens)}\n调用轮次: ${c.turnsCount} 轮`;
+      return `<div class="daily-cell lvl-${c.level} ${c.isToday ? 'today' : ''}" data-date="${c.date}" data-net="${c.netTokens}" data-gross="${c.grossTokens}" data-turns="${c.turnsCount}" title="${escapeHtml(titleTip)}">
         <span class="daily-cell-date">${escapeHtml(c.label)}</span>
         <span class="daily-cell-tok">${tokStr}</span>
       </div>`;
@@ -250,23 +262,28 @@ function renderGlobalMetrics(g) {
     .join('');
 
   if (daily.today) {
-    $('g-today-tok').textContent = `${formatCompactTokens(daily.today.totalTokens)} (${daily.today.turnsCount} 轮)`;
+    const todayTok = isNet ? (daily.today.netTokens ?? daily.today.totalTokens) : (daily.today.grossTokens ?? daily.today.totalTokens);
+    $('g-today-tok').textContent = `${formatCompactTokens(todayTok)} (${daily.today.turnsCount} 轮)`;
   }
   if (daily.peakDay) {
-    $('g-peak-day').textContent = `${daily.peakDay.date} · ${formatCompactTokens(daily.peakDay.totalTokens)} (${daily.peakDay.turnsCount} 轮)`;
+    const peakTok = isNet ? (daily.peakDay.netTokens ?? daily.peakDay.totalTokens) : (daily.peakDay.grossTokens ?? daily.peakDay.totalTokens);
+    $('g-peak-day').textContent = `${daily.peakDay.date} · ${formatCompactTokens(peakTok)} (${daily.peakDay.turnsCount} 轮)`;
   }
 
   document.querySelectorAll('#g-daily-heatmap .daily-cell').forEach((cell) => {
     cell.addEventListener('click', () => {
       const dt = cell.dataset.date;
-      const tk = Number(cell.dataset.tok || 0);
+      const netVal = Number(cell.dataset.net || 0);
+      const grossVal = Number(cell.dataset.gross || 0);
       const tr = Number(cell.dataset.turns || 0);
-      $('g-today-tok').textContent = `${dt}：${formatCompactTokens(tk)} (${tr} 轮)`;
+      const selVal = isNet ? netVal : grossVal;
+      $('g-today-tok').textContent = `${dt}：${formatCompactTokens(selVal)} (${tr} 轮)`;
     });
   });
 
   if (hourly.peakHour) {
-    $('g-peak-hour').textContent = `高峰 ${hourly.peakHour.label} (${formatCompactTokens(hourly.peakHour.totalTokens)})`;
+    const peakHTok = isNet ? (hourly.peakHour.netTokens ?? hourly.peakHour.totalTokens) : (hourly.peakHour.grossTokens ?? hourly.peakHour.totalTokens);
+    $('g-peak-hour').textContent = `高峰 ${hourly.peakHour.label} (${formatCompactTokens(peakHTok)})`;
   } else {
     $('g-peak-hour').textContent = '高峰时段 --';
   }
@@ -274,9 +291,10 @@ function renderGlobalMetrics(g) {
   const hourlyCells = Array.isArray(hourly.cells) ? hourly.cells : [];
   $('g-hourly-heatmap').innerHTML = hourlyCells
     .map((h) => {
-      const barH = h.totalTokens > 0 ? Math.max(14, h.pctOfPeak) : 6;
+      const hTok = isNet ? (h.netTokens ?? h.totalTokens) : (h.grossTokens ?? h.totalTokens);
+      const barH = hTok > 0 ? Math.max(14, h.pctOfPeak) : 6;
       const showLbl = h.hour % 3 === 0 ? String(h.hour).padStart(2, '0') : '';
-      const tip = `${h.label} - ${String(h.hour).padStart(2, '0')}:59\n累计 Token: ${formatCompactTokens(h.totalTokens)}\n调用轮次: ${h.turnsCount} 轮`;
+      const tip = `${h.label} - ${String(h.hour).padStart(2, '0')}:59\n实际净消耗: ${formatCompactTokens(h.netTokens)}\n全量吞吐: ${formatCompactTokens(h.grossTokens)}\n调用轮次: ${h.turnsCount} 轮`;
       return `<div class="hour-col" title="${escapeHtml(tip)}">
         <div class="hour-bar-wrap">
           <div class="hour-bar lvl-${h.level}" style="height: ${barH}%"></div>
@@ -304,14 +322,22 @@ function renderGlobalMetrics(g) {
             ? `${p.conversationsCount} 会话 + ${p.subagentsCount} 子Agent`
             : `${p.conversationsCount} 个会话`;
 
+        const pTok = isNet ? (p.netTokens ?? p.totalTokens) : (p.grossTokens ?? p.totalTokens);
+        const pShare = isNet ? (p.netSharePct ?? p.sharePct) : p.sharePct;
+        const pSecondary = isNet ? `吞吐 ${formatCompactTokens(p.grossTokens)}` : `净 ${formatCompactTokens(p.netTokens)}`;
+
         const convRowsHtml = isExpanded
           ? `<div class="project-convs-drawer">
               ${p.conversations
                 .map(
-                  (c) => `<div class="proj-conv-row" data-conv-id="${escapeHtml(c.id)}" title="点击切换到该会话实时详情">
-                    <span class="proj-conv-title">${escapeHtml(c.title)}</span>
-                    <span class="proj-conv-meta">${c.turnsCount} 轮 · <b>${formatCompactTokens(c.totalTokens)}</b></span>
-                  </div>`
+                  (c) => {
+                    const cTok = isNet ? (c.netTokens ?? c.totalTokens) : (c.grossTokens ?? c.totalTokens);
+                    const cSec = isNet ? `吞吐 ${formatCompactTokens(c.grossTokens)}` : `净 ${formatCompactTokens(c.netTokens)}`;
+                    return `<div class="proj-conv-row" data-conv-id="${escapeHtml(c.id)}" title="点击切换到该会话实时详情">
+                      <span class="proj-conv-title">${escapeHtml(c.title)}</span>
+                      <span class="proj-conv-meta">${c.turnsCount} 轮 · <b>${formatCompactTokens(cTok)}</b> <span class="muted small">(${cSec})</span></span>
+                    </div>`;
+                  }
                 )
                 .join('')}
             </div>`
@@ -324,18 +350,18 @@ function renderGlobalMetrics(g) {
               <span class="group-name">${escapeHtml(p.name)}</span>
             </div>
             <div class="group-right">
-              <span class="group-tok">${formatCompactTokens(p.totalTokens)}</span>
-              <span class="group-pct">${p.sharePct}%</span>
+              <span class="group-tok">${formatCompactTokens(pTok)}</span>
+              <span class="group-pct">${pShare}%</span>
             </div>
           </div>
           <div class="group-subtitle">${escapeHtml(p.subtitle)} · 点击${isExpanded ? '收起' : '展开'}会话明细</div>
           <div class="group-bar-track">
-            <div class="group-bar-fill ${barCls}" style="width: ${Math.max(2, p.sharePct)}%"></div>
+            <div class="group-bar-fill ${barCls}" style="width: ${Math.max(2, pShare)}%"></div>
           </div>
           <div class="group-meta-row">
             <span>${sessDesc} · ${p.turnsCount} 轮</span>
             <span>缓存命中 ${p.cacheHitRate}% · 均速 ${p.avgTokPerSec} tok/s</span>
-            <span>输出 ${formatCompactTokens(p.outputTokens)}</span>
+            <span>(${pSecondary}) · 输出 ${formatCompactTokens(p.outputTokens)}</span>
           </div>
           ${convRowsHtml}
         </div>`;
@@ -373,6 +399,10 @@ function renderGlobalMetrics(g) {
         const isAnthropic = m.provider === 'Anthropic';
         const badgeCls = isAnthropic ? 'badge-anthropic' : 'badge-google';
         const barCls = isAnthropic ? 'fill-amber' : '';
+        const mTok = isNet ? (m.netTokens ?? m.totalTokens) : (m.grossTokens ?? m.totalTokens);
+        const mShare = isNet ? (m.netSharePct ?? m.sharePct) : m.sharePct;
+        const mSecondary = isNet ? `吞吐 ${formatCompactTokens(m.grossTokens)}` : `净 ${formatCompactTokens(m.netTokens)}`;
+
         return `<div class="group-item">
           <div class="group-top">
             <div class="group-title-wrap">
@@ -380,12 +410,12 @@ function renderGlobalMetrics(g) {
               <span class="group-name">${escapeHtml(m.name)}</span>
             </div>
             <div class="group-right">
-              <span class="group-tok">${formatCompactTokens(m.totalTokens)}</span>
-              <span class="group-pct">${m.sharePct}%</span>
+              <span class="group-tok">${formatCompactTokens(mTok)}</span>
+              <span class="group-pct">${mShare}%</span>
             </div>
           </div>
           <div class="group-bar-track">
-            <div class="group-bar-fill ${barCls}" style="width: ${Math.max(2, m.sharePct)}%"></div>
+            <div class="group-bar-fill ${barCls}" style="width: ${Math.max(2, mShare)}%"></div>
           </div>
           <div class="group-meta-row">
             <span>调用 ${m.turnsCount} 轮 (${m.conversationsCount} 会话)</span>
@@ -393,7 +423,7 @@ function renderGlobalMetrics(g) {
           </div>
           <div class="group-meta-row">
             <span>缓存命中 ${m.cacheHitRate}% (读缓存 ${formatCompactTokens(m.cacheReadTokens)})</span>
-            <span>输出 ${formatCompactTokens(m.outputTokens)} (思考占 ${m.thinkingRatioPct}%)</span>
+            <span>输出 ${formatCompactTokens(m.outputTokens)} (${mSecondary})</span>
           </div>
         </div>`;
       })
@@ -409,6 +439,8 @@ function renderGlobalMetrics(g) {
   } else {
     topEl.innerHTML = topConvs
       .map((c, idx) => {
+        const cTok = isNet ? (c.netTokens ?? c.totalTokens) : (c.grossTokens ?? c.totalTokens);
+        const cSec = isNet ? `吞吐 ${formatCompactTokens(c.grossTokens)}` : `净 ${formatCompactTokens(c.netTokens)}`;
         return `<div class="turn-item clickable-row" data-conv-id="${escapeHtml(c.id)}" title="点击查看该会话的实时上下文与轮次详情">
           <div class="turn-left">
             <span class="turn-badge">#${idx + 1}</span>
@@ -417,7 +449,7 @@ function renderGlobalMetrics(g) {
           <div class="turn-right">
             <span>[${escapeHtml(c.projectName)}]</span>
             <span>${c.turnsCount} 轮</span>
-            <span class="turn-speed">${formatCompactTokens(c.totalTokens)}</span>
+            <span class="turn-speed">${formatCompactTokens(cTok)} <small style="font-size:10px;font-weight:normal;color:var(--muted-foreground)">(${cSec})</small></span>
           </div>
         </div>`;
       })
@@ -454,6 +486,18 @@ function init() {
   document.querySelectorAll('#view-tabs .view-tab').forEach((btn) => {
     btn.addEventListener('click', () => {
       switchTab(btn.dataset.tab);
+    });
+  });
+
+  document.querySelectorAll('#scope-switch .scope-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      globalMetricScope = btn.dataset.scope;
+      document.querySelectorAll('#scope-switch .scope-btn').forEach((b) => {
+        b.classList.toggle('active', b.dataset.scope === globalMetricScope);
+      });
+      if (lastGlobalMetrics) {
+        renderGlobalMetrics(lastGlobalMetrics);
+      }
     });
   });
 
